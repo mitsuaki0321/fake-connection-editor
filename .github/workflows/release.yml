@@ -1,0 +1,65 @@
+name: Release by Tag
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create release package
+        run: |
+          # Maya のスクリプトパスへ展開する配布物を組む
+          mkdir -p release_package
+          cp -r src/fake_connection_editor release_package/
+          cp README.md LICENSE release_package/
+
+          # バージョン入りファイル名で ZIP 化
+          cd release_package
+          zip -r ../fake-connection-editor_${{ github.ref_name }}.zip .
+          cd ..
+
+      - name: Generate release notes
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          cat << EOF > release_notes.md
+          ## Fake Connection Editor ${VERSION}
+
+          ### インストール
+          1. \`fake-connection-editor_${GITHUB_REF_NAME}.zip\` をダウンロード
+          2. 展開し、\`fake_connection_editor\` フォルダを Maya のスクリプトパスに置く
+             （例: \`<ユーザー>/Documents/maya/scripts/\`）
+          3. Maya を再起動
+
+          ### 起動
+          \`\`\`python
+          import fake_connection_editor
+          fake_connection_editor.launch()
+          \`\`\`
+
+          ### 動作環境
+          - Autodesk Maya 2023 以降（Python 3.9 以上 / PySide2・PySide6）
+
+          ---
+
+          ソースは [リポジトリ](https://github.com/${{ github.repository }}) を参照してください。
+          EOF
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Release ${{ github.ref_name }}
+          body_path: release_notes.md
+          files: fake-connection-editor_${{ github.ref_name }}.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

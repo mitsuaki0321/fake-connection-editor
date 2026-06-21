@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fake-connection-editor"
+version = "0.1.0"
+description = "Maya Connection Editor の再実装（テスト可能な4層アーキテクチャ）"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["ruff>=0.6", "pytest>=7.0"]
+# UI 開発・dev 起動目視は PySide2（Maya 2023 基準）で行う。
+qt = ["PySide2>=5.15"]
+# PySide6 は最終段階での両対応確認用（普段は使わない）。
+qt6 = ["PySide6>=6.5"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# 同梱アイコン SVG を package-data として含める（Maya 配布・非 editable インストールで
+# themed_icon が filesystem 読みする SVG を確実に同梱する。icons/ は __init__.py を持たない
+# データディレクトリなので、親パッケージ fake_connection_editor.ui のデータとして glob 指定する）。
+[tool.setuptools.package-data]
+"fake_connection_editor.ui" = ["icons/*.svg"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py39"
+src = ["src", "tests"]
+# samples は IF 検証用の参考スクリプト。lint/format の対象外にする
+extend-exclude = ["samples"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "B", "UP", "N", "D"]
+# 日本語 docstring では末尾の「。」を pydocstyle が終端と認識しないため D415 を無効化
+ignore = ["D415"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["D"]
+# UI 層は Qt の必須イディオムを許容する:
+#   N802 = QAbstractItemModel/QWidget のオーバーライド（paintEvent/rowCount 等）の camelCase
+#   B008 = Qt 慣習の parent=QModelIndex() デフォルト引数
+"src/fake_connection_editor/ui/*" = ["N802", "B008"]
+
+[tool.ruff.format]
+# black 互換のデフォルト設定を使用（line-length は [tool.ruff] を継承）
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,18 @@
+# ローカル専用（公開リポジトリに含めない）。ディスクには残るが git は追跡しない。
+docs/
+CLAUDE.md
+samples/
+mocs/
+
+# ドット始まりのファイル/フォルダ（.venv .pytest_cache .ruff_cache .DS_Store .git 等）
+.*
+# ただし無視設定と CI 定義はリポジトリで共有する
+!.gitignore
+!.github/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
