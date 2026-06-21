@@ -139,7 +139,7 @@ class EditorWindow(QtWidgets.QWidget):
         self._text_active: dict[str, bool] = {}
         self._pre_filter_expanded: dict[str, set] = {}
 
-        self.setWindowTitle("Connection Editor (dev)")
+        self.setWindowTitle("Connection Editor")
         self.resize(520, 490)  # 実機で扱いやすい初期サイズ（縦長・1カラム的）
 
         # コラプス三角を細い三角に差し替えるスタイル（両ツリーで共有・参照保持必須）。

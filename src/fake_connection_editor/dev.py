@@ -97,6 +97,7 @@ def main() -> int:
     app, window = build_app(
         scene, left=left, right=right, node_pool=scene.all_node_ids()
     )
+    window.setWindowTitle("Connection Editor (dev)")  # dev 起動を見分けやすく
     window.show()
     return app.exec_()
 
