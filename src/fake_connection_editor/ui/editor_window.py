@@ -24,7 +24,7 @@ from .connection_overlay import ConnectionOverlay
 from .errors import error_handler
 from .icons import themed_icon
 from .interaction import InteractionController
-from .qt_compat import QAction, QActionGroup, Qt, QtCore, QtGui, QtWidgets
+from .qt_compat import QAction, QActionGroup, Qt, QtCore, QtGui, QtWidgets, shiboken
 from .settings import SettingsStore
 from .tree_model import AttributeTreeModel
 from .widgets import (
@@ -1087,10 +1087,20 @@ class EditorWindow(QtWidgets.QWidget):
     def _link_external_scrollbar(
         self, tree: QtWidgets.QTreeView, bar: QtWidgets.QScrollBar
     ) -> None:
-        """ツリーの内蔵縦バーと外側カスタムバーを双方向同期する（左右共用・§3.1）。"""
-        inner = tree.verticalScrollBar()
+        """ツリーの内蔵縦バーと外側カスタムバーを双方向同期する（左右共用・§3.1）。
+
+        内蔵バー (``inner``) は Maya のスタイル再適用などで作り直され得るため、
+        キャプチャしたポインタを使い回さず毎回 ``tree`` から取り直す。さらに各
+        クロス参照を ``shiboken.isValid`` でガードし、C++ 実体が先に破棄された
+        タイミングで触れても ``already deleted`` で落ちないようにする。
+        """
 
         def sync_range() -> None:
+            if not shiboken.isValid(tree) or not shiboken.isValid(bar):
+                return
+            inner = tree.verticalScrollBar()
+            if not shiboken.isValid(inner):
+                return
             bar.setRange(inner.minimum(), inner.maximum())
             bar.setPageStep(inner.pageStep())
             bar.setSingleStep(inner.singleStep())
@@ -1099,10 +1109,22 @@ class EditorWindow(QtWidgets.QWidget):
             # （問題1）。スクロール不要なときは無効表示にして触れないことを示す。
             bar.setEnabled(inner.maximum() > inner.minimum())
 
+        def push_to_inner(value: int) -> None:
+            if not shiboken.isValid(tree):
+                return
+            inner = tree.verticalScrollBar()
+            if shiboken.isValid(inner):
+                inner.setValue(value)
+
+        def push_to_bar(value: int) -> None:
+            if shiboken.isValid(bar):
+                bar.setValue(value)
+
+        inner = tree.verticalScrollBar()
         sync_range()
         inner.rangeChanged.connect(lambda *_: sync_range())
-        inner.valueChanged.connect(bar.setValue)
-        bar.valueChanged.connect(inner.setValue)
+        inner.valueChanged.connect(push_to_bar)
+        bar.valueChanged.connect(push_to_inner)
 
     # ---- 同期 ----
     def _on_vm_changed(self, structural: bool, side: str | None = None) -> None:
