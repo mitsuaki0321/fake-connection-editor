@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from logging import getLogger
+from typing import TypeVar
 
 from ..core import FilterCriteria, TypeCategory
 from ..scene_access.interface import NodeId, PlugId, SceneAccess
@@ -23,7 +24,7 @@ from .connection_overlay import ConnectionOverlay
 from .errors import error_handler
 from .icons import themed_icon
 from .interaction import InteractionController
-from .qt_compat import QActionGroup, Qt, QtCore, QtGui, QtWidgets
+from .qt_compat import QAction, QActionGroup, Qt, QtCore, QtGui, QtWidgets
 from .settings import SettingsStore
 from .tree_model import AttributeTreeModel
 from .widgets import (
@@ -35,6 +36,8 @@ from .widgets import (
 )
 
 logger = getLogger(__name__)
+
+_T = TypeVar("_T")  # _keep の引数/戻り値の型を保つための型変数
 
 _MENU_SETTINGS_KEY = "menu"  # メニューバーのオプションを 1 まとめで保存するキー
 
@@ -154,6 +157,8 @@ class EditorWindow(QtWidgets.QWidget):
         self._filter_nonkeyable: dict[str, object] = {}
         self._filter_connected: dict[str, object] = {}
         self._filter_extra_only: dict[str, object] = {}
+        # QMenu / QActionGroup のラッパを保持し GC を防ぐ（PySide6 の道連れ対策）。
+        self._keepalive: list[object] = []
 
         # 保存済みメニュー設定を読み、sort/name はメニュー構築前に VM へ適用する
         # （Edit ラジオが vm.sort_mode()/name_mode() を見て checked を初期化するため）。
@@ -336,6 +341,44 @@ class EditorWindow(QtWidgets.QWidget):
         if fill:
             widget.setAutoFillBackground(True)
 
+    def _keep(self, obj: _T) -> _T:
+        """Qt オブジェクトの Python ラッパを保持して GC を防ぐ（受けた obj を返す）。"""
+        self._keepalive.append(obj)
+        return obj
+
+    def _new_action(
+        self,
+        menu: QtWidgets.QMenu,
+        label: str,
+        *,
+        checkable: bool = False,
+        checked: bool = False,
+        tooltip: str = "",
+    ) -> QAction:
+        """窓を親にした ``QAction`` を生成して menu に追加し、それを返す。
+
+        親を窓 (``self``) に固定し C++ 実体の寿命を窓と合わせる。``menu.addAction(str)``
+        は PySide6 で所有が曖昧になり GC で消えるため使わない。
+
+        Args:
+            menu: 追加先のメニュー。
+            label: アクションのラベル。
+            checkable: チェック可能にするか。
+            checked: 初期チェック状態（``checkable`` 時のみ有効）。
+            tooltip: 設定するツールチップ（空なら未設定）。
+
+        Returns:
+            生成した ``QAction``。
+        """
+        action = QAction(label, self)
+        if checkable:
+            action.setCheckable(True)
+            action.setChecked(checked)
+        if tooltip:
+            action.setToolTip(tooltip)
+        menu.addAction(action)
+        return action
+
     def _build_menu_bar(self) -> QtWidgets.QMenuBar:
         """上部メニューバーを組む（Options・Edit）。
 
@@ -399,30 +442,32 @@ class EditorWindow(QtWidgets.QWidget):
             bar: 追加先のメニューバー。
         """
         saved = self._saved_menu
-        menu = bar.addMenu("Options")
-        self._force_action = menu.addAction("Force connect")
-        self._force_action.setCheckable(True)
-        self._force_action.setChecked(bool(saved.get("force_connect", False)))
-        self._force_action.setToolTip(
-            "Unlock / replace existing input and force-connect or overwrite"
+        menu = self._keep(bar.addMenu("Options"))
+        self._force_action = self._new_action(
+            menu,
+            "Force connect",
+            checkable=True,
+            checked=bool(saved.get("force_connect", False)),
+            tooltip="Unlock / replace existing input and force-connect or overwrite",
         )
         self._force_action.toggled.connect(self._save_menu_settings)
-        self._force_disconnect_action = menu.addAction("Force disconnect")
-        self._force_disconnect_action.setCheckable(True)
-        self._force_disconnect_action.setChecked(
-            bool(saved.get("force_disconnect", False))
-        )
-        self._force_disconnect_action.setToolTip(
-            "Unlock a locked input attribute to disconnect it"
+        self._force_disconnect_action = self._new_action(
+            menu,
+            "Force disconnect",
+            checkable=True,
+            checked=bool(saved.get("force_disconnect", False)),
+            tooltip="Unlock a locked input attribute to disconnect it",
         )
         self._force_disconnect_action.toggled.connect(self._save_menu_settings)
-        self._autoscroll_action = menu.addAction("Scroll to connected")
-        self._autoscroll_action.setCheckable(True)
-        self._autoscroll_action.setChecked(
-            bool(saved.get("scroll_to_connected", False))
-        )
-        self._autoscroll_action.setToolTip(
-            "Select an attribute to scroll the opposite side to its connected attribute"
+        self._autoscroll_action = self._new_action(
+            menu,
+            "Scroll to connected",
+            checkable=True,
+            checked=bool(saved.get("scroll_to_connected", False)),
+            tooltip=(
+                "Select an attribute to scroll the opposite side to its "
+                "connected attribute"
+            ),
         )
         self._autoscroll_action.toggled.connect(self._save_menu_settings)
 
@@ -435,7 +480,7 @@ class EditorWindow(QtWidgets.QWidget):
         Args:
             bar: 追加先のメニューバー。
         """
-        menu = bar.addMenu("Edit")
+        menu = self._keep(bar.addMenu("Edit"))
         self._build_radio_submenu(
             menu,
             "Sort Attributes",
@@ -475,13 +520,13 @@ class EditorWindow(QtWidgets.QWidget):
             current: 現在選択中の値（チェック初期化用）。
             on_select: 選択時に呼ぶハンドラ（値を1つ受ける）。
         """
-        sub = menu.addMenu(title)
-        group = QActionGroup(sub)
+        sub = self._keep(menu.addMenu(title))
+        group = self._keep(QActionGroup(sub))
         group.setExclusive(True)
         for value, label in items:
-            action = sub.addAction(label)
-            action.setCheckable(True)
-            action.setChecked(value == current)
+            action = self._new_action(
+                sub, label, checkable=True, checked=(value == current)
+            )
             group.addAction(action)
             action.triggered.connect(lambda *_, v=value: on_select(v))
             action.triggered.connect(self._save_menu_settings)
@@ -657,9 +702,9 @@ class EditorWindow(QtWidgets.QWidget):
         text.setPlaceholderText("Filter...")
         text.setClearButtonEnabled(True)
         text.setFixedHeight(22)  # モック準拠
-        text.addAction(  # 欄内左に検索アイコン（モック準拠・装飾）
-            themed_icon("search", fg), QtWidgets.QLineEdit.LeadingPosition
-        )
+        # 欄内左に検索アイコン（モック準拠・装飾）。窓を親にして GC で消えないように。
+        search_action = QAction(themed_icon("search", fg), "", self)
+        text.addAction(search_action, QtWidgets.QLineEdit.LeadingPosition)
         text.textChanged.connect(lambda *_, s=side: self._rebuild_filter(s))
         self._filter_text[side] = text
         row.addWidget(text, 1)
@@ -707,19 +752,18 @@ class EditorWindow(QtWidgets.QWidget):
             self._tool_bg_qss(self._band(_BG_FUNNEL_K))
             + "QToolButton::menu-indicator{image:none;}"
         )
-        menu = QtWidgets.QMenu(funnel)
-        nk = menu.addAction("Show Non-Keyable")
-        nk.setCheckable(True)
-        nk.setChecked(True)  # 既定で非 keyable も表示（現状の表示を保つ）
+        menu = self._keep(QtWidgets.QMenu(funnel))
+        # 既定で非 keyable も表示（現状の表示を保つ）。
+        nk = self._new_action(menu, "Show Non-Keyable", checkable=True, checked=True)
         nk.toggled.connect(lambda *_, s=side: self._rebuild_filter(s))
-        co = menu.addAction("Show Connected Only")
-        co.setCheckable(True)
-        co.setChecked(False)
+        co = self._new_action(menu, "Show Connected Only", checkable=True)
         co.toggled.connect(lambda *_, s=side: self._rebuild_filter(s))
-        ex = menu.addAction("Show Extra Attribute Only")
-        ex.setCheckable(True)
-        ex.setChecked(False)
-        ex.setToolTip("Show only user-defined (extra) attributes")
+        ex = self._new_action(
+            menu,
+            "Show Extra Attribute Only",
+            checkable=True,
+            tooltip="Show only user-defined (extra) attributes",
+        )
         ex.toggled.connect(lambda *_, s=side: self._rebuild_filter(s))
         funnel.setMenu(menu)
         self._filter_nonkeyable[side] = nk
