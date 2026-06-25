@@ -206,8 +206,7 @@ class InteractionController:
             and not self._busy()
             and self._is_tree_area(obj)
         ):
-            self._select_under_cursor(obj, event.pos())
-            self._show_value_menu(event.globalPos())
+            self._show_value_menu(obj, event.pos(), event.globalPos())
             return True
         return False
 
@@ -279,24 +278,32 @@ class InteractionController:
         return any(obj is self._trees[s].viewport() for s in (LEFT, RIGHT))
 
     # ---- 値コピー（右クリックメニュー・master §5.3） ----
-    def _select_under_cursor(self, obj: QtCore.QObject, pos: QtCore.QPoint) -> None:
-        """右クリックした行をそのツリーの選択にする（属性行のみ・master §5.3）。
+    def _select_under_cursor(
+        self, obj: QtCore.QObject, pos: QtCore.QPoint
+    ) -> tuple[str | None, PlugId | None]:
+        """右クリックした行をそのツリーの選択にし、その (side, plug) を返す。
 
         右クリックでは Qt 標準は選択を変えないため、ここでクリック直下の属性行を
         currentIndex に反映して「左クリックで選ぶ」手間を 1 回減らす。セクション行や
-        空白上では選択を変えない。
+        空白上・中央帯では選択を変えず ``(None, None)`` を返す（master §5.3）。
 
         Args:
             obj: ContextMenu を受けた viewport（左右どちらかのツリー）。
             pos: viewport ローカルのクリック座標。
+
+        Returns:
+            右クリック直下の ``(side, plug)``。属性行でなければ ``(None, None)``。
         """
         for side in (LEFT, RIGHT):
             tree = self._trees[side]
             if tree.viewport() is obj:
                 idx = tree.indexAt(pos)
-                if idx.isValid() and self._models[side].plug_at(idx) is not None:
+                plug = self._models[side].plug_at(idx) if idx.isValid() else None
+                if plug is not None:
                     tree.setCurrentIndex(idx)
-                return
+                    return side, plug
+                return None, None
+        return None, None
 
     def _current_plug(self, side: str) -> PlugId | None:
         """その側ツリーで現在選択中の属性 plug を返す（セクション行は None）。"""
@@ -364,23 +371,80 @@ class InteractionController:
         if not result.ok:
             self._warn_copy(result.reason)
 
-    def _show_value_menu(self, global_pos: QtCore.QPoint) -> None:
-        """値コピーの右クリックメニューを出す（方向トグルに従う・master §5.3）。
+    def _show_value_menu(
+        self, obj: QtCore.QObject, pos: QtCore.QPoint, global_pos: QtCore.QPoint
+    ) -> None:
+        """右クリックメニューを出す（接続たどり・値コピー・master §5.3）。
 
-        メニュー項目は事前にグレーアウトせず常に表示し、実行時に左右選択や互換性を
-        評価して不可なら警告する（実行時拒否・master §5.5）。
+        右クリック直下の属性（起点 plug）を基点に、接続をたどる項目（Load/Add
+        Connected）と現在値コピー（Copy Attribute Value）を出し、続けて従来の左右
+        ペア値コピー（Copy Value / Copy Value (Leaf)）を出す。起点ベースの項目は
+        条件を満たさなければグレーアウトし、ペア値コピーは事前にグレーアウトせず
+        実行時に評価する（実行時拒否・master §5.5）。
 
         Args:
+            obj: ContextMenu を受けた viewport（左右ツリー or 中央帯）。
+            pos: viewport ローカルのクリック座標。
             global_pos: メニューを出すグローバル座標。
         """
+        side, plug = self._select_under_cursor(obj, pos)
+
         menu = QtWidgets.QMenu(self._window)
+        has_conn = plug is not None and self._vm.is_connected(plug)
+        can_copy_attr = plug is not None and self._vm.can_copy_value(plug)
+        act_load = menu.addAction("Load Connected")
+        act_add = menu.addAction("Add Connected")
+        act_copy_attr = menu.addAction("Copy Attribute Value")
+        act_load.setEnabled(has_conn)
+        act_add.setEnabled(has_conn)
+        act_copy_attr.setEnabled(can_copy_attr)
+        menu.addSeparator()
         act_value = menu.addAction("Copy Value")
         act_leaf = menu.addAction("Copy Value (Leaf)")
+
         chosen = menu.exec_(global_pos)
         if chosen is act_value:
             self.copy_value_selected(leaf=False)
         elif chosen is act_leaf:
             self.copy_value_selected(leaf=True)
+        elif chosen is act_load:
+            self.load_connected(side, plug, add=False)
+        elif chosen is act_add:
+            self.load_connected(side, plug, add=True)
+        elif chosen is act_copy_attr:
+            self.copy_attribute_value(plug)
+
+    @error_handler
+    def load_connected(self, side: str, plug: PlugId, *, add: bool) -> None:
+        """起点 plug の接続相手ノード群を反対側ツリーへロードする（master §3.2）。
+
+        Args:
+            side: 起点 plug が属する側（``LEFT`` / ``RIGHT``）。
+            plug: 右クリックした起点 plug。
+            add: True なら反対側へ追加（Add）、False なら置換（Load）。
+        """
+        nodes = self._vm.connected_nodes(plug)
+        opposite = RIGHT if side == LEFT else LEFT
+        if add:
+            self._vm.add_nodes(opposite, nodes)
+        else:
+            self._vm.set_nodes(opposite, nodes)
+
+    @error_handler
+    def copy_attribute_value(self, plug: PlugId) -> None:
+        """起点 plug の現在値をクリップボードへコピーする（master §5.3）。
+
+        コピー可能なのは NUMERIC / MATRIX のみ。メニューで事前にグレーアウト済みだが、
+        保険として実行時にも不可なら警告して中止する。
+
+        Args:
+            plug: 右クリックした起点 plug。
+        """
+        text = self._vm.read_value_text(plug)
+        if text is None:
+            self._warn("This attribute type has no copyable value.")
+            return
+        QtWidgets.QApplication.clipboard().setText(text)
 
     def _warn_copy(self, reason) -> None:
         """値コピー失敗/警告を warning レベルで知らせる（master §5.3）。"""

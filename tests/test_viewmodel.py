@@ -588,6 +588,78 @@ def test_copy_value_leaf(scene: FakeSceneAccess) -> None:
         assert scene.get_value(_plug(SAMPLE_SPHERE2, 1, i)) == v
 
 
+# ---- 接続たどり（右クリック Load/Add Connected・master §3.2） ----
+def test_connected_nodes_returns_partner_only(scene: FakeSceneAccess) -> None:
+    vm = _loaded_vm(scene)
+    # n1.translate -> n2.translate（出力）。相手ノードのみ（自ノードは含めない）。
+    nodes = vm.connected_nodes(_plug(SAMPLE_SPHERE1, 0))
+    assert [n.uuid for n in nodes] == [SAMPLE_SPHERE2.uuid]
+
+
+def test_connected_nodes_self_connection_includes_self(scene: FakeSceneAccess) -> None:
+    vm = _loaded_vm(scene)
+    # 同一ノード内の接続（A.translateX -> A.scaleX）は相手端点が自ノード → 自ノード。
+    scene.connect(_plug(SAMPLE_SPHERE1, 0, 0), _plug(SAMPLE_SPHERE1, 1, 0))
+    nodes = vm.connected_nodes(_plug(SAMPLE_SPHERE1, 0, 0))
+    assert [n.uuid for n in nodes] == [SAMPLE_SPHERE1.uuid]
+
+
+def test_connected_nodes_unconnected_is_empty(scene: FakeSceneAccess) -> None:
+    vm = _loaded_vm(scene)
+    vm.child_nodes(_plug(SAMPLE_SPHERE1, 1))
+    # scale の子 scaleX は未接続 → 空。
+    assert vm.connected_nodes(_plug(SAMPLE_SPHERE1, 1, 0)) == []
+
+
+# ---- 属性値コピー（右クリック Copy Attribute Value・master §5.3） ----
+def test_read_value_text_scalar(scene: FakeSceneAccess) -> None:
+    vm = _loaded_vm(scene)
+    vm.child_nodes(_plug(SAMPLE_SPHERE1, 0))  # 子の型タグをキャッシュ
+    plug = _plug(SAMPLE_SPHERE1, 0, 0)  # translateX (double)
+    scene.set_value(plug, 4.2)
+    assert vm.read_value_text(plug) == "4.2"
+
+
+def test_read_value_text_vector_unwraps_outer_list(scene: FakeSceneAccess) -> None:
+    vm = _loaded_vm(scene)
+    vm.root_nodes(LEFT)  # translate(double3) の型タグをキャッシュ
+    plug = _plug(SAMPLE_SPHERE1, 0)  # translate (double3)
+    scene.set_value(plug, [(1.0, 2.0, 3.0)])  # getAttr(double3) 相当
+    assert vm.read_value_text(plug) == "(1.0, 2.0, 3.0)"
+
+
+def test_read_value_text_matrix(scene: FakeSceneAccess) -> None:
+    vm = _loaded_vm(scene)
+    vm.root_nodes(LEFT)
+    plug = _plug(SAMPLE_SPHERE1, 3)  # worldMatrix (matrix)
+    flat = list(range(16))
+    scene.set_value(plug, flat)
+    assert vm.read_value_text(plug) == str(flat)
+
+
+def test_read_value_text_bool_is_copyable(scene: FakeSceneAccess) -> None:
+    vm = _loaded_vm(scene)
+    vm.root_nodes(LEFT)  # visibility(bool) の型タグをキャッシュ
+    plug = _plug(SAMPLE_SPHERE1, 2)  # visibility (bool)
+    scene.set_value(plug, True)
+    # bool は DATA でない → 値が取得できる型なのでコピー可。
+    assert vm.read_value_text(plug) == "True"
+
+
+def test_read_value_text_data_type_is_none() -> None:
+    # message(DATA) は値を持たない型 → 型カテゴリでコピー不可と判定（実機 getAttr を
+    # 叩く前に弾く）。Fake は値を持っても DATA タグなら None を返す。
+    scene = FakeSceneAccess()
+    node = NodeId(uuid="UUID-MSG", path="|msgNode")
+    scene.set_root_attributes(
+        node, [AttrMeta(_plug(node, 0), "message", "message", short_name="msg")]
+    )
+    vm = EditorViewModel(scene)
+    vm.load(LEFT, node)
+    vm.root_nodes(LEFT)  # 型タグをキャッシュ
+    assert vm.read_value_text(_plug(node, 0)) is None
+
+
 # ---- 接続不可の理由（ConnectBlock・実行時警告の文言用・master §5.5） ----
 def _readonly_matrix_scene() -> tuple[FakeSceneAccess, NodeId, NodeId]:
     """matrix の readable-only / 非スカラー子 compound を持つ最小シーン。

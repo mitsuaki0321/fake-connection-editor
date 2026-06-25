@@ -29,6 +29,7 @@ from ..core import (
     build_child_nodes,
     check_connect,
     check_leaf_connect,
+    classify,
     ghost_indices,
     is_compatible,
     should_display,
@@ -612,6 +613,78 @@ class EditorViewModel:
     def get_connections(self, plug: PlugId) -> Connections:
         """Plug の接続状態を返す。"""
         return self._scene.get_connections(plug)
+
+    def connected_nodes(self, plug: PlugId) -> list[NodeId]:
+        """Plug の接続相手ノード群を返す（右クリック Load/Add Connected 用）。
+
+        入力（sources）・出力（destinations）の両端点のノードを集める。起点ノードは
+        無条件には含めない（自己接続＝同一ノードの別属性とつながる場合のみ、相手端点
+        として自ノードが自然に含まれる）。重複 uuid は除去して順序を保つ。
+
+        Args:
+            plug: 起点となる plug。
+
+        Returns:
+            接続相手ノード列（重複除去・表示順）。接続が無ければ空。
+        """
+        conns = self._scene.get_connections(plug)
+        nodes = [end.node for end in (*conns.sources, *conns.destinations)]
+        return self._dedup(nodes)
+
+    def can_copy_value(self, plug: PlugId) -> bool:
+        """Plug の現在値をコピーできる型か返す（メニュー enable 用・master §5.3）。
+
+        型カテゴリのみで判定し実シーン（``getAttr``）には触れない。``DATA``（message /
+        無型 compound 等、値を持たない型）以外をコピー可とする。右クリックのたびに値を
+        取りに行かずに enable を決めるための軽量判定。
+
+        Args:
+            plug: 対象 plug。
+
+        Returns:
+            コピー可能な型なら ``True``。
+        """
+        return classify(self.type_tag(plug)) is not TypeCategory.DATA
+
+    def read_value_text(self, plug: PlugId) -> str | None:
+        """Plug の現在値をクリップボード用テキストに整形する（master §5.3）。
+
+        コピー可否は値の有無ではなく型カテゴリで決める。``DATA``（message / 無型
+        compound 等、そもそも値を持たない型）のみコピー不可とし、それ以外（numeric /
+        bool / matrix / color、string や enum も含む）は値が取得できる前提でコピー可。
+        型タグは表示行の列挙時にキャッシュ済みなので Maya 非依存で判定できる。整形規則:
+            - ベクトル（``getAttr`` が返す ``[(x, y, z)]``）: 外側リストを 1 段外す。
+            - matrix（flat な 16 float）/ スカラー / 文字列 等: そのまま ``str()``。
+
+        実機 ``getAttr`` が array 等で例外を投げる/``None`` を返す不測のケースは保険
+        として ``None``（実行時に警告・master §5.5）に落とす。
+
+        Args:
+            plug: 対象 plug。
+
+        Returns:
+            コピー用テキスト。コピー不可な型・値が取得できないなら ``None``。
+        """
+        if classify(self.type_tag(plug)) is TypeCategory.DATA:
+            return None
+        try:
+            value = self._scene.get_value(plug)
+        except Exception:  # noqa: BLE001  実機 getAttr が array 等で投げる保険
+            return None
+        if value is None:
+            return None
+        return str(self._unwrap_vector(value))
+
+    @staticmethod
+    def _unwrap_vector(value):
+        """GetAttr が返すベクトルの外側リスト（``[(x, y, z)]``）を 1 段外す。"""
+        if (
+            isinstance(value, (list, tuple))
+            and len(value) == 1
+            and isinstance(value[0], (list, tuple))
+        ):
+            return value[0]
+        return value
 
     def _connected_set(self, node: NodeId) -> frozenset[PlugId]:
         """ノードの接続済み plug 集合を返す（per-node 1回照会＋キャッシュ）。
