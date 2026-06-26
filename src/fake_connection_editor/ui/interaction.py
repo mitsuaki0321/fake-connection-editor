@@ -417,10 +417,8 @@ class InteractionController:
         """右クリックメニューを出す（接続たどり・値コピー・master §5.3）。
 
         右クリック直下の属性（起点 plug）を基点に、接続をたどる項目（Load/Add
-        Connected）と現在値コピー（Copy Attribute Value）を出し、続けて従来の左右
-        ペア値コピー（Copy Value / Copy Value (Leaf)）を出す。起点ベースの項目は
-        条件を満たさなければグレーアウトし、ペア値コピーは事前にグレーアウトせず
-        実行時に評価する（実行時拒否・master §5.5）。
+        Connected）と現在値コピー（Copy Attribute Value）を出す。各項目は条件を
+        満たさなければグレーアウトする。
 
         Args:
             obj: ContextMenu を受けた viewport（左右ツリー or 中央帯）。
@@ -438,16 +436,9 @@ class InteractionController:
         act_load.setEnabled(has_conn)
         act_add.setEnabled(has_conn)
         act_copy_attr.setEnabled(can_copy_attr)
-        menu.addSeparator()
-        act_value = menu.addAction("Copy Value")
-        act_leaf = menu.addAction("Copy Value (Leaf)")
 
         chosen = menu.exec_(global_pos)
-        if chosen is act_value:
-            self.copy_value_selected(leaf=False)
-        elif chosen is act_leaf:
-            self.copy_value_selected(leaf=True)
-        elif chosen is act_load:
+        if chosen is act_load:
             self.load_connected(side, plug, add=False)
         elif chosen is act_add:
             self.load_connected(side, plug, add=True)
