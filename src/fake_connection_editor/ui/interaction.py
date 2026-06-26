@@ -225,6 +225,11 @@ class InteractionController:
     def _on_left_press(self, obj: QtWidgets.QWidget, event: QtCore.QEvent) -> bool:
         """左押下の分岐を判定して処理する（handle_event から呼ぶ）。"""
         global_pos = event.globalPos()
+        if event.modifiers() & Qt.ControlModifier:
+            # Ctrl+クリックは常に追加選択（ポート掴み/開閉より優先・§5.2）。
+            # 属性行でなければ何もしないが、Ctrl 中は一律消費して Qt 既定の
+            # トグル選択（空白/セクションへの誤反応）を抑える。
+            return self._toggle_additional_selection(obj, global_pos)
         hit = self._overlay.port_at(global_pos)
         if hit is not None:
             self._begin_drag(obj, hit, global_pos)
@@ -236,6 +241,41 @@ class InteractionController:
         if self._maybe_toggle_branch(obj, global_pos):
             return True  # コラプス開閉で消費（当たり判定を広げる）
         return False
+
+    def _toggle_additional_selection(
+        self, obj: QtWidgets.QWidget, global_pos: QtCore.QPoint
+    ) -> bool:
+        """Ctrl+クリックで属性行を追加選択にトグルする（同一ツリー内の複数選択）。
+
+        左右で1つずつ選ぶ既存パラダイム（Connect/Copy）は別ツリー間だが、出力の
+        一括付け替えなどは**同じ側のツリーで2つ**を指す必要がある。ツリーは
+        ``SingleSelection`` のままにし（ドラッグ範囲選択を避ける）、Ctrl+クリック時
+        だけ選択モデルを手で操作して追加/解除する。既存機能は ``currentIndex``
+        （単一）で動くため、current は最後にクリックした行へ移すだけにする
+        （Scroll to connected はその current で反対側を追従＝承諾済みの挙動）。
+
+        Args:
+            obj: 押下を受けたウィジェット（ツリーの viewport を期待）。
+            global_pos: 押下のグローバル座標。
+
+        Returns:
+            常に True（Ctrl 中は一律消費する）。属性行でなければトグルせず消費のみ。
+        """
+        for side in (LEFT, RIGHT):
+            tree = self._trees[side]
+            if tree.viewport() is not obj:
+                continue
+            pos = tree.viewport().mapFromGlobal(global_pos)
+            idx = tree.indexAt(pos)
+            # 属性行のみ対象（無効行・セクション見出しは追加選択しない）。
+            if not idx.isValid() or self._models[side].plug_at(idx) is None:
+                return True
+            selection = tree.selectionModel()
+            selection.select(idx, QtCore.QItemSelectionModel.Toggle)
+            # 選択は触らず current だけ移す（トグル結果を保ったまま追従を効かせる）。
+            selection.setCurrentIndex(idx, QtCore.QItemSelectionModel.NoUpdate)
+            return True
+        return True
 
     def _maybe_toggle_branch(
         self, obj: QtWidgets.QWidget, global_pos: QtCore.QPoint
