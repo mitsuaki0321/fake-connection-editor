@@ -213,6 +213,7 @@ class RealMayaBackend:
             has_children=plug.isCompound or plug.isArray,
             is_locked=plug.isLocked,
             is_user_defined=plug.isDynamic,  # listAttr(ud=True) 相当（実機で要確認）
+            is_hidden=mfn.hidden,  # MFnAttribute.hidden（Maya 内部用属性の大半）
         )
 
     @staticmethod

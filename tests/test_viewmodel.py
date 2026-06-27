@@ -788,6 +788,44 @@ def test_set_filter_extra_only_keeps_user_defined(scene: FakeSceneAccess) -> Non
     assert names == ["myExtra"]  # extra のみ
 
 
+def test_set_filter_hidden_hides_hidden_by_default() -> None:
+    # hidden 属性を1つ持つ最小シーンで Show Hidden を検証。
+    s = FakeSceneAccess()
+    node = NodeId(uuid="UUID-HIDDEN", path="|hd")
+    s.set_root_attributes(
+        node,
+        [
+            AttrMeta(_plug(node, 0), "translateX", "double"),  # 通常
+            AttrMeta(
+                _plug(node, 1), "internalAttr", "double", is_hidden=True
+            ),  # hidden
+        ],
+    )
+    vm = EditorViewModel(s)
+    vm.load(LEFT, node)
+    # show_non_keyable=True（UI 既定）でも既定は hidden を隠す（_is_permissive 回帰）。
+    vm.set_filter(
+        LEFT,
+        FilterCriteria(
+            enabled_categories=frozenset(TypeCategory),
+            show_non_keyable=True,
+        ),
+    )
+    names = [n.display_name for n in vm.visible_attr_nodes(LEFT, node)]
+    assert names == ["translateX"]  # hidden は隠れる
+    # show_hidden=True で hidden も表示。
+    vm.set_filter(
+        LEFT,
+        FilterCriteria(
+            enabled_categories=frozenset(TypeCategory),
+            show_non_keyable=True,
+            show_hidden=True,
+        ),
+    )
+    names = [n.display_name for n in vm.visible_attr_nodes(LEFT, node)]
+    assert names == ["translateX", "internalAttr"]
+
+
 def test_leaf_blocker_non_scalar_child() -> None:
     scene, a, b = _readonly_matrix_scene()
     vm = EditorViewModel(scene)

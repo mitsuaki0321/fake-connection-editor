@@ -51,6 +51,7 @@ class RawAttr:
         is_locked: ロックされているか（列挙時スナップショット）。
         is_user_defined: ユーザー定義（extra/dynamic）属性か（``listAttr(ud=True)``
             相当・フィルタ Show Extra Attribute Only 用）。
+        is_hidden: hidden 属性か（``MFnAttribute.hidden``・フィルタ Show Hidden 用）。
     """
 
     display_name: str
@@ -65,6 +66,7 @@ class RawAttr:
     has_children: bool = False
     is_locked: bool = False
     is_user_defined: bool = False
+    is_hidden: bool = False
 
 
 class MayaBackend(Protocol):

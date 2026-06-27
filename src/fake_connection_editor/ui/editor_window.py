@@ -151,12 +151,15 @@ class EditorWindow(QtWidgets.QWidget):
         self._trees: dict[str, QtWidgets.QTreeView] = {}
         self._models: dict[str, AttributeTreeModel] = {}
         self._pickers: dict[str, QtWidgets.QComboBox] = {}
+        # 外付けスクロールバーの再同期関数（側ごと・ロード直後の取りこぼし対策）。
+        self._sync_bars: dict[str, Callable[[], None]] = {}
         # フィルタ行のウィジェット（左右独立・master §9）。
         self._filter_text: dict[str, QtWidgets.QLineEdit] = {}
         self._filter_chips: dict[str, dict[TypeCategory, QtWidgets.QPushButton]] = {}
         self._filter_nonkeyable: dict[str, object] = {}
         self._filter_connected: dict[str, object] = {}
         self._filter_extra_only: dict[str, object] = {}
+        self._filter_hidden: dict[str, object] = {}
         # QMenu / QActionGroup のラッパを保持し GC を防ぐ（PySide6 の道連れ対策）。
         self._keepalive: list[object] = []
 
@@ -637,7 +640,7 @@ class EditorWindow(QtWidgets.QWidget):
         # 内蔵バーを隠し外付けバーを外側の端へ（常時表示で出入りの幅変動なし・問題1）。
         bar = QtWidgets.QScrollBar(Qt.Vertical)
         tree.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self._link_external_scrollbar(tree, bar)
+        self._sync_bars[side] = self._link_external_scrollbar(tree, bar)
         if side == LEFT:
             row.addWidget(bar)  # 左端
             row.addWidget(tree)
@@ -765,10 +768,19 @@ class EditorWindow(QtWidgets.QWidget):
             tooltip="Show only user-defined (extra) attributes",
         )
         ex.toggled.connect(lambda *_, s=side: self._rebuild_filter(s))
+        # 既定 OFF＝hidden 属性を隠す（Maya 標準 Connection Editor と同じ）。
+        hd = self._new_action(
+            menu,
+            "Show Hidden",
+            checkable=True,
+            tooltip="Show hidden attributes (Maya internal, rarely connected)",
+        )
+        hd.toggled.connect(lambda *_, s=side: self._rebuild_filter(s))
         funnel.setMenu(menu)
         self._filter_nonkeyable[side] = nk
         self._filter_connected[side] = co
         self._filter_extra_only[side] = ex
+        self._filter_hidden[side] = hd
         row.addWidget(funnel)
         return row
 
@@ -838,6 +850,7 @@ class EditorWindow(QtWidgets.QWidget):
             show_non_keyable=self._filter_nonkeyable[side].isChecked(),
             show_connected_only=self._filter_connected[side].isChecked(),
             extra_only=self._filter_extra_only[side].isChecked(),
+            show_hidden=self._filter_hidden[side].isChecked(),
             text=self._filter_text[side].text(),
         )
         self._vm.set_filter(side, criteria)
@@ -1083,16 +1096,25 @@ class EditorWindow(QtWidgets.QWidget):
         ex.blockSignals(True)
         ex.setChecked(crit.extra_only)
         ex.blockSignals(False)
+        hd = self._filter_hidden[side]
+        hd.blockSignals(True)
+        hd.setChecked(crit.show_hidden)
+        hd.blockSignals(False)
 
     def _link_external_scrollbar(
         self, tree: QtWidgets.QTreeView, bar: QtWidgets.QScrollBar
-    ) -> None:
+    ) -> Callable[[], None]:
         """ツリーの内蔵縦バーと外側カスタムバーを双方向同期する（左右共用・§3.1）。
 
         内蔵バー (``inner``) は Maya のスタイル再適用などで作り直され得るため、
         キャプチャしたポインタを使い回さず毎回 ``tree`` から取り直す。さらに各
         クロス参照を ``shiboken.isValid`` でガードし、C++ 実体が先に破棄された
         タイミングで触れても ``already deleted`` で落ちないようにする。
+
+        Returns:
+            外付けバーを内蔵バーへ再同期する関数。ロード直後などレイアウト確定前に
+            ``rangeChanged`` が走り ``pageStep`` を取りこぼした場合に、呼び出し側が
+            ディレイ再同期するために使う。
         """
 
         def sync_range() -> None:
@@ -1125,6 +1147,19 @@ class EditorWindow(QtWidgets.QWidget):
         inner.rangeChanged.connect(lambda *_: sync_range())
         inner.valueChanged.connect(push_to_bar)
         bar.valueChanged.connect(push_to_inner)
+        return sync_range
+
+    def _schedule_bar_resync(self, side: str) -> None:
+        """構造リフレッシュ後、レイアウト確定を待って外付けバーを再同期する。
+
+        ロード直後は内蔵バーの ``rangeChanged`` がビューポート高（``pageStep``）の
+        確定前に走り、外付けバーのつまみが短く出ることがある。1 イベントループ分
+        遅らせて取り直すことで、ロード直後でも正しいつまみ長さにする。
+        """
+        sync = self._sync_bars.get(side)
+        if sync is None:
+            return
+        QtCore.QTimer.singleShot(0, sync)
 
     # ---- 同期 ----
     def _on_vm_changed(self, structural: bool, side: str | None = None) -> None:
@@ -1150,6 +1185,7 @@ class EditorWindow(QtWidgets.QWidget):
                 self._trees[target].expandToDepth(0)
                 self._sync_expansion(target, expanded)
                 self._restore_selection(target, selected)
+                self._schedule_bar_resync(target)
             self._refresh_titles()
         self._overlay.update()
 

@@ -10,6 +10,8 @@ from fake_connection_editor.scene_access import MayaSceneAccess, normalize_type
 from fake_connection_editor.scene_access.fake_maya_backend import (
     SAMPLE_A,
     SAMPLE_B,
+    FakeMayaBackend,
+    _Attr,
     build_sample_maya_backend,
 )
 from fake_connection_editor.scene_access.interface import NodeId, PlugId
@@ -79,6 +81,28 @@ def test_list_root_attributes() -> None:
     # index_path は位置順
     assert by_name["translate"].plug.index_path == (0,)
     assert by_name["inputMatrix"].plug.index_path == (2,)
+
+
+def test_hidden_flag_carried_through_normalize() -> None:
+    # is_hidden が backend → normalize → AttrMeta と引き継がれる（専用シーン）。
+    backend = FakeMayaBackend()
+    node = NodeId(uuid="UUID-HD", path="|hd")
+    backend.add_node(
+        node.uuid,
+        node.path,
+        [
+            _Attr(display_name="translateX", api_type="kDoubleLinearAttribute"),
+            _Attr(
+                display_name="internalAttr",
+                api_type="kDoubleLinearAttribute",
+                is_hidden=True,
+            ),
+        ],
+    )
+    scene = MayaSceneAccess(backend)
+    by_name = {m.display_name: m for m in scene.list_root_attributes(node)}
+    assert by_name["internalAttr"].is_hidden is True
+    assert by_name["translateX"].is_hidden is False
 
 
 def test_unknown_node_returns_empty() -> None:

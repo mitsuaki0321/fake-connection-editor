@@ -31,6 +31,7 @@ class _Attr:
     is_writable: bool = True
     is_locked: bool = False
     is_user_defined: bool = False
+    is_hidden: bool = False
     value: Any = None
     children: list[_Attr] = field(default_factory=list)  # compound 子（位置順）
     elements: dict[int, _Attr] = field(default_factory=dict)  # array 論理index→要素
@@ -161,6 +162,7 @@ class FakeMayaBackend:
             has_children=cur.is_compound or cur.is_array,
             is_locked=cur.is_locked,
             is_user_defined=cur.is_user_defined,
+            is_hidden=cur.is_hidden,
         )
 
     def plug_key(self, plug: PlugKey) -> PlugKey:

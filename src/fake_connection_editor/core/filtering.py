@@ -57,6 +57,7 @@ class FilterCriteria:
         show_non_keyable: True なら non-keyable 属性も表示する（既定 False）。
         show_connected_only: True なら接続済みの属性だけ表示する（既定 False）。
         extra_only: True ならユーザー定義（extra）属性だけ表示する（既定 False）。
+        show_hidden: True なら hidden 属性も表示する（既定 False＝隠す）。
         text: テキスト検索語（部分一致・大文字小文字無視）。空なら無効。
     """
 
@@ -64,12 +65,13 @@ class FilterCriteria:
     show_non_keyable: bool = False
     show_connected_only: bool = False
     extra_only: bool = False
+    show_hidden: bool = False
     text: str = ""
 
     @classmethod
     def all_visible(cls) -> FilterCriteria:
         """全型を表示し、トグル/検索を無効にした既定条件を返す。"""
-        return cls(enabled_categories=frozenset(TypeCategory))
+        return cls(enabled_categories=frozenset(TypeCategory), show_hidden=True)
 
 
 def should_display(
@@ -86,7 +88,8 @@ def should_display(
         2. non-keyable かつ ``show_non_keyable`` が False。
         3. ``show_connected_only`` が True かつ未接続。
         4. ``extra_only`` が True かつユーザー定義属性でない。
-        5. ``text`` が非空かつ検索対象名に部分一致しない（大小無視）。
+        5. hidden 属性かつ ``show_hidden`` が False。
+        6. ``text`` が非空かつ検索対象名に部分一致しない（大小無視）。
 
     テキスト検索の対象名は表示モードに合わせる。``match_short`` が True なら shortName
     （空なら longName へフォールバック）、False なら longName に一致判定する。画面で
@@ -111,6 +114,8 @@ def should_display(
     if criteria.show_connected_only and not is_connected:
         return False
     if criteria.extra_only and not meta.is_user_defined:
+        return False
+    if meta.is_hidden and not criteria.show_hidden:
         return False
     if criteria.text:
         target = (

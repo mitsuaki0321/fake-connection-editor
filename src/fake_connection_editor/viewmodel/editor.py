@@ -145,8 +145,11 @@ class EditorViewModel:
         self._attr_nodes_cache: dict[str, list[TreeNode]] = {}
         self._child_nodes_cache: dict[PlugId, list[TreeNode]] = {}
         # フィルタ条件（左右独立・master §9）。初期は全許容（現状表示を壊さない）。
+        # 初期条件。漏斗の既定状態（起動時は push されない）と一致させる: 型は全表示・
+        # non-keyable は表示・hidden は隠す（Show Hidden が既定 OFF のため）。
         permissive = FilterCriteria(
-            enabled_categories=frozenset(TypeCategory), show_non_keyable=True
+            enabled_categories=frozenset(TypeCategory),
+            show_non_keyable=True,
         )
         self._criteria: dict[str, FilterCriteria] = {
             LEFT: permissive,
@@ -452,6 +455,7 @@ class EditorViewModel:
             and criteria.show_non_keyable
             and not criteria.show_connected_only
             and not criteria.extra_only
+            and criteria.show_hidden
             and not criteria.text
         )
 

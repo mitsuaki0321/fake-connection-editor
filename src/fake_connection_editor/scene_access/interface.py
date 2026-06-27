@@ -78,6 +78,8 @@ class AttrMeta:
             最新状態は ``SceneAccess.is_locked`` で取る。
         is_user_defined: ユーザー定義（extra/dynamic）属性か（``addAttr`` で足した
             属性・``cmds.listAttr(ud=True)`` 相当）。Show Extra Attribute Only 用。
+        is_hidden: hidden 属性か（Maya の ``MFnAttribute.hidden``）。Maya 内部用の
+            属性が大半で接続にはほぼ使わない。Show Hidden 用（既定で隠す）。
         existing_indices: array のみ。``getExistingArrayAttributeIndices()`` 由来の
             既存インデックス列（ゴースト算出 C4 の入力。master §5.6/§10.2）。
             array でない場合は ``None``。空 array は ``()``。
@@ -95,6 +97,7 @@ class AttrMeta:
     has_children: bool = False
     is_locked: bool = False
     is_user_defined: bool = False
+    is_hidden: bool = False
     existing_indices: tuple[int, ...] | None = None
 
 

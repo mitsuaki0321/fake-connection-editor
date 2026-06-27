@@ -177,9 +177,15 @@ def _meta(
     keyable: bool = True,
     name: str = "attr",
     user_defined: bool = False,
+    hidden: bool = False,
 ) -> AttrMeta:
     return AttrMeta(
-        _plug(0), name, tag, is_keyable=keyable, is_user_defined=user_defined
+        _plug(0),
+        name,
+        tag,
+        is_keyable=keyable,
+        is_user_defined=user_defined,
+        is_hidden=hidden,
     )
 
 
@@ -220,6 +226,18 @@ def test_c6_extra_only() -> None:
         should_display(_meta(user_defined=False), is_connected=True, criteria=crit)
         is False
     )
+
+
+def test_c6_hidden_hidden_unless_shown() -> None:
+    # 既定（show_hidden=False）は hidden を隠す。
+    crit = FilterCriteria(enabled_categories=frozenset(TypeCategory))
+    assert should_display(_meta(hidden=True), is_connected=True, criteria=crit) is False
+    assert should_display(_meta(hidden=False), is_connected=True, criteria=crit) is True
+    # show_hidden=True で hidden も表示。
+    crit_show = FilterCriteria(
+        enabled_categories=frozenset(TypeCategory), show_hidden=True
+    )
+    assert should_display(_meta(hidden=True), is_connected=True, criteria=crit_show)
 
 
 def test_c6_text_substring_case_insensitive() -> None:

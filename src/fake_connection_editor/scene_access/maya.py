@@ -273,6 +273,7 @@ class MayaSceneAccess:
             has_children=raw.has_children,
             is_locked=raw.is_locked,
             is_user_defined=raw.is_user_defined,
+            is_hidden=raw.is_hidden,
             existing_indices=existing,
         )
 
