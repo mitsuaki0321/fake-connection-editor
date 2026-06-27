@@ -254,6 +254,12 @@ class EditorWindow(QtWidgets.QWidget):
             )
             tree.clicked.connect(lambda *_, s=side: self._on_tree_current_changed(s))
 
+        # 復元した漏斗フィルタの状態を VM へ反映する（リスナー登録前なので set_filter の
+        # 通知は no-op＝起動時の余計な再描画もクラッシュもない。_apply_saved_modes_to_vm
+        # と同じ「リスナー前に適用」の作法）。型チップ/検索テキストは既定のまま。
+        for side in (LEFT, RIGHT):
+            self._rebuild_filter(side)
+
         vm.add_listener(self._on_vm_changed)
         self._refresh_titles()
         self._apply_backgrounds()
@@ -404,6 +410,16 @@ class EditorWindow(QtWidgets.QWidget):
         saved = self._settings.read(_MENU_SETTINGS_KEY, {})
         return saved if isinstance(saved, dict) else {}
 
+    def _saved_filter(self, side: str, key: str, default: bool) -> bool:
+        """保存済み漏斗フィルタの 1 トグル状態を返す（未保存/破損なら ``default``）。"""
+        filters = self._saved_menu.get("filters", {})
+        if not isinstance(filters, dict):
+            return default
+        side_filters = filters.get(side, {})
+        if not isinstance(side_filters, dict):
+            return default
+        return bool(side_filters.get(key, default))
+
     def _apply_saved_modes_to_vm(self) -> None:
         """保存済みの Sort/Name モードをメニュー構築前に VM へ適用する。
 
@@ -432,6 +448,15 @@ class EditorWindow(QtWidgets.QWidget):
                 "scroll_to_connected": self._autoscroll_action.isChecked(),
                 "sort_mode": self._vm.sort_mode().name,
                 "name_mode": self._vm.name_mode().name,
+                "filters": {
+                    side: {
+                        "non_keyable": self._filter_nonkeyable[side].isChecked(),
+                        "connected_only": self._filter_connected[side].isChecked(),
+                        "extra_only": self._filter_extra_only[side].isChecked(),
+                        "hidden": self._filter_hidden[side].isChecked(),
+                    }
+                    for side in (LEFT, RIGHT)
+                },
             },
         )
 
@@ -756,26 +781,42 @@ class EditorWindow(QtWidgets.QWidget):
             + "QToolButton::menu-indicator{image:none;}"
         )
         menu = self._keep(QtWidgets.QMenu(funnel))
-        # 既定で非 keyable も表示（現状の表示を保つ）。
-        nk = self._new_action(menu, "Show Non-Keyable", checkable=True, checked=True)
+        # 既定で非 keyable も表示（現状の表示を保つ）。保存値あれば左右独立で復元。
+        nk = self._new_action(
+            menu,
+            "Show Non-Keyable",
+            checkable=True,
+            checked=self._saved_filter(side, "non_keyable", True),
+        )
         nk.toggled.connect(lambda *_, s=side: self._rebuild_filter(s))
-        co = self._new_action(menu, "Show Connected Only", checkable=True)
+        nk.toggled.connect(self._save_menu_settings)
+        co = self._new_action(
+            menu,
+            "Show Connected Only",
+            checkable=True,
+            checked=self._saved_filter(side, "connected_only", False),
+        )
         co.toggled.connect(lambda *_, s=side: self._rebuild_filter(s))
+        co.toggled.connect(self._save_menu_settings)
         ex = self._new_action(
             menu,
             "Show Extra Attribute Only",
             checkable=True,
+            checked=self._saved_filter(side, "extra_only", False),
             tooltip="Show only user-defined (extra) attributes",
         )
         ex.toggled.connect(lambda *_, s=side: self._rebuild_filter(s))
+        ex.toggled.connect(self._save_menu_settings)
         # 既定 OFF＝hidden 属性を隠す（Maya 標準 Connection Editor と同じ）。
         hd = self._new_action(
             menu,
             "Show Hidden",
             checkable=True,
+            checked=self._saved_filter(side, "hidden", False),
             tooltip="Show hidden attributes (Maya internal, rarely connected)",
         )
         hd.toggled.connect(lambda *_, s=side: self._rebuild_filter(s))
+        hd.toggled.connect(self._save_menu_settings)
         funnel.setMenu(menu)
         self._filter_nonkeyable[side] = nk
         self._filter_connected[side] = co
